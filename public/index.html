@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panel OnTrader</title>
+  <style>
+    table { width:100%; border-collapse:collapse; }
+    th,td { border:1px solid #333; padding:4px; text-align:center; }
+    .high { color:limegreen; }
+    .mid  { color:orange; }
+    .low  { color:red; }
+  </style>
+</head>
+<body>
+  <h1>OnTrader Score Panel</h1>
+  <div id="ontrader-panel">Cargando…</div>
+  <script>
+    (async function(){
+      const endpoint = '/api/index-data';
+      const panel = document.getElementById('ontrader-panel');
+      async function render() {
+        try {
+          const resp = await fetch(endpoint);
+          const { data } = await resp.json();
+          panel.innerHTML = \`
+            <table>
+              <thead><tr><th>Symbol</th><th>Precio</th><th>Score</th></tr></thead>
+              <tbody>
+                \${data.map(d=>\`
+                  <tr>
+                    <td>\${d.symbol}</td>
+                    <td>\${d.price.toFixed(4)}</td>
+                    <td class="\${d.score>=8?'high':d.score>=5?'mid':'low'}">
+                      \${d.score.toFixed(2)}
+                    </td>
+                  </tr>\`).join('')}
+              </tbody>
+            </table>\`;
+        } catch(e) {
+          panel.innerText = 'Error cargando datos';
+        }
+      }
+      await render();
+      setInterval(render, 10*60*1000);
+    })();
+  </script>
+</body>
+</html>

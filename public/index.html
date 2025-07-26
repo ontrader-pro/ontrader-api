@@ -3,47 +3,96 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Panel OnTrader</title>
+  <title>OnTrader Score Panel</title>
   <style>
-    table { width:100%; border-collapse:collapse; }
-    th,td { border:1px solid #333; padding:4px; text-align:center; }
-    .high { color:limegreen; }
-    .mid  { color:orange; }
-    .low  { color:red; }
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #101729;
+      color: #fff;
+    }
+    h1 {
+      text-align: center;
+      color: #25f0ff;
+      margin-bottom: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: auto;
+    }
+    th, td {
+      border: 1px solid #333;
+      padding: 8px;
+      text-align: center;
+    }
+    thead {
+      background: #1f2a44;
+      color: #25f0ff;
+    }
+    .high { color: limegreen; }
+    .mid  { color: orange; }
+    .low  { color: red; }
+    #ontrader-panel {
+      text-align: center;
+      font-size: 1.1rem;
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
   <h1>OnTrader Score Panel</h1>
   <div id="ontrader-panel">Cargando…</div>
+
   <script>
-    (async function(){
-      const endpoint = '/api/index-data';
-      const panel = document.getElementById('ontrader-panel');
-      async function render() {
-        try {
-          const resp = await fetch(endpoint);
-          const { data } = await resp.json();
-          panel.innerHTML = \`
-            <table>
-              <thead><tr><th>Symbol</th><th>Precio</th><th>Score</th></tr></thead>
-              <tbody>
-                \${data.map(d=>\`
-                  <tr>
-                    <td>\${d.symbol}</td>
-                    <td>\${d.price.toFixed(4)}</td>
-                    <td class="\${d.score>=8?'high':d.score>=5?'mid':'low'}">
-                      \${d.score.toFixed(2)}
-                    </td>
-                  </tr>\`).join('')}
-              </tbody>
-            </table>\`;
-        } catch(e) {
-          panel.innerText = 'Error cargando datos';
+  (async function(){
+    const endpoint = 'https://ontrader-api.onrender.com/api/index-data';
+    const panel = document.getElementById('ontrader-panel');
+
+    async function render() {
+      panel.innerText = 'Cargando datos…';
+      try {
+        const resp = await fetch(endpoint, { mode: 'cors' });
+        const { data } = await resp.json();
+
+        if (!Array.isArray(data) || data.length === 0) {
+          panel.innerText = 'No hay datos disponibles';
+          return;
         }
+
+        const rows = data.map(d => `
+          <tr>
+            <td>${d.symbol}</td>
+            <td>${d.price.toFixed(4)}</td>
+            <td class="${d.score >= 8 ? 'high' : d.score >= 5 ? 'mid' : 'low'}">
+              ${d.score.toFixed(2)}
+            </td>
+          </tr>
+        `).join('');
+
+        panel.innerHTML = `
+          <table>
+            <thead>
+              <tr><th>Symbol</th><th>Precio</th><th>Score</th></tr>
+            </thead>
+            <tbody>
+              ${rows}
+            </tbody>
+          </table>
+        `;
+      } catch (e) {
+        console.error(e);
+        panel.innerText = 'Error cargando datos';
       }
-      await render();
-      setInterval(render, 10*60*1000);
-    })();
+    }
+
+    // Primera carga
+    await render();
+
+    // Refrescar cada 10 minutos
+    setInterval(render, 10 * 60 * 1000);
+  })();
   </script>
 </body>
 </html>

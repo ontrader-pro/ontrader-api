@@ -1,97 +1,113 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OnTrader Score Panel</title>
   <style>
-    body {
-      font-family: sans-serif;
-      margin: 0;
-      padding: 20px;
-      background: #101729;
-      color: #fff;
-    }
-    h1 {
-      text-align: center;
-      color: #25f0ff;
-      margin-bottom: 20px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: auto;
-    }
-    th, td {
-      border: 1px solid #333;
-      padding: 8px;
-      text-align: center;
-    }
-    thead {
-      background: #1f2a44;
-      color: #25f0ff;
-    }
+    body { font-family: sans-serif; padding: 20px; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th, td { border:1px solid #333; padding:6px; text-align:center; }
     .high { color: limegreen; }
     .mid  { color: orange; }
     .low  { color: red; }
-    #ontrader-panel {
-      text-align: center;
-      font-size: 1.1rem;
-      margin-top: 20px;
-    }
+    #panel { min-height: 100px; }
   </style>
 </head>
 <body>
   <h1>OnTrader Score Panel</h1>
-  <div id="ontrader-panel">Cargando…</div>
+  <div id="panel"><p>Cargando datos…</p></div>
 
   <script>
   (async function(){
-    const endpoint = 'https://ontrader-api.onrender.com/api/index-data';
-    const panel = document.getElementById('ontrader-panel');
+    const panel = document.getElementById('panel');
 
-    async function render() {
-      panel.innerText = 'Cargando datos…';
-      try {
-        const resp = await fetch(endpoint, { mode: 'cors' });
-        const { data } = await resp.json();
-
-        if (!Array.isArray(data) || data.length === 0) {
-          panel.innerText = 'No hay datos disponibles';
-          return;
-        }
-
-        const rows = data.map(d => `
-          <tr>
-            <td>${d.symbol}</td>
-            <td>${d.price.toFixed(4)}</td>
-            <td class="${d.score >= 8 ? 'high' : d.score >= 5 ? 'mid' : 'low'}">
-              ${d.score.toFixed(2)}
-            </td>
-          </tr>
-        `).join('');
-
-        panel.innerHTML = `
-          <table>
-            <thead>
-              <tr><th>Symbol</th><th>Precio</th><th>Score</th></tr>
-            </thead>
-            <tbody>
-              ${rows}
-            </tbody>
-          </table>
-        `;
-      } catch (e) {
-        console.error(e);
-        panel.innerText = 'Error cargando datos';
+    // funciones de cálculo
+    const calcEMA = (arr,p) => {
+      const k = 2/(p+1);
+      return arr.reduce((ema,v,i)=> i? v*k + ema*(1-k) : v, arr[0]);
+    };
+    const calcRSI = (arr) => {
+      let gains=0, losses=0;
+      for(let i=1;i<arr.length;i++){
+        const d = arr[i]-arr[i-1];
+        if(d>0) gains+=d; else losses-=d;
       }
+      const ag=gains/(arr.length-1), al=losses/(arr.length-1)||1e-6, rs=ag/al;
+      return 100 - (100/(1+rs));
+    };
+    const computeScore = (price, minD, maxD, ema6h, rsi6h, ema3h, rsi3h) => {
+      let s=1;
+      if(price>minD) s+=3;
+      if(price>maxD) s+=2;
+      if(rsi6h>50&&price>ema6h) s+=2;
+      if(rsi6h<50&&price<ema6h) s-=2;
+      if(rsi3h>70&&price>ema3h) s+=1;
+      if(rsi3h<30&&price<ema3h) s-=1;
+      if(rsi3h<15) s+=0.5;
+      if(rsi3h>85) s-=0.5;
+      return Math.max(1, Math.min(10, s));
+    };
+
+    try {
+      // 1) Top15 por volumen 24h
+      const tickers = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr')
+                          .then(r=>r.json());
+      const top15 = tickers
+        .filter(t=>t.symbol.endsWith('USDT'))
+        .sort((a,b)=> +b.quoteVolume - +a.quoteVolume)
+        .slice(0,15)
+        .map(t=>t.symbol);
+
+      // 2) Rango domingo (usamos el primer símbolo)
+      const daily = await fetch(
+        `https://fapi.binance.com/fapi/v1/klines?symbol=${top15[0]}&interval=1d&limit=10`
+      ).then(r=>r.json());
+      const suns = daily.filter(c=> new Date(c[0]).getUTCDay()===0);
+      const lastSun = suns.length ? suns[suns.length-1] : daily[daily.length-1];
+      const sundayMin = +lastSun[3], sundayMax = +lastSun[2];
+
+      // 3) Calcular score para cada uno
+      let rows = '';
+      for (const sym of top15) {
+        // precio actual
+        const price = +(await fetch(
+          `https://fapi.binance.com/fapi/v1/ticker/price?symbol=${sym}`
+        ).then(r=>r.json())).price;
+
+        // cierres 6h y 3h
+        const k6 = await fetch(
+          `https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=6h&limit=28`
+        ).then(r=>r.json());
+        const a6 = k6.map(c=>+c[4]);
+
+        const k3 = await fetch(
+          `https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=3h&limit=28`
+        ).then(r=>r.json());
+        const a3 = k3.map(c=>+c[4]);
+
+        const ema6 = calcEMA(a6,28), rsi6 = calcRSI(a6);
+        const ema3 = calcEMA(a3,28), rsi3 = calcRSI(a3);
+
+        const score = computeScore(price, sundayMin, sundayMax, ema6, rsi6, ema3, rsi3);
+        rows += `<tr>
+          <td>${sym}</td>
+          <td>${price.toFixed(4)}</td>
+          <td class="${score>=8?'high':score>=5?'mid':'low'}">
+            ${score.toFixed(2)}
+          </td>
+        </tr>`;
+      }
+
+      // 4) Renderizar tabla
+      panel.innerHTML = `
+        <table>
+          <thead><tr><th>Symbol</th><th>Precio</th><th>Score</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    } catch(err) {
+      panel.innerHTML = `<p style="color:red">Error: ${err.message}</p>`;
     }
-
-    // Primera carga
-    await render();
-
-    // Refrescar cada 10 minutos
-    setInterval(render, 10 * 60 * 1000);
   })();
   </script>
 </body>
